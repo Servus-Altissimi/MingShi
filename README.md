@@ -21,7 +21,7 @@
 
 ## Why?
 
-This project originally came to be for my game engine "Liefde". This project has long been discontinued however. Now it is meant to be an extensive synthesizer for any audio project. Most new features will be targeted towards supplementing my wip audiovisitory tool [UmbraFex](https://github.com/servus-altissimi/umbrafex)
+This project originally came to be for my game engine "Liefde". This project has long been discontinued however. Now it is meant to be an extensive synthesizer for any audio project. Most new features will be targeted towards supplementing my wip audiovisual tool [UmbraFex](https://github.com/servus-altissimi/umbrafex)
 
 ## Features
 
