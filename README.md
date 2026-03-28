@@ -343,7 +343,7 @@ mingshi = { version = "0.1", features = ["gpu"] }
 
 ### Custom Shaders
 
-Shaders can be loaded from disk and referenced by name. The built-in fallback shader (`__boomie_synth`) is auto-generated from the active waveform set. The built-in name can be shadowed by loading a custom shader under `DEFAULT_SYNTH_SHADER_NAME`.
+Shaders can be loaded from disk and referenced by name. The built-in fallback shader (`__mingshi_synth`) is auto-generated from the active waveform set. The built-in name can be shadowed by loading a custom shader under `DEFAULT_SYNTH_SHADER_NAME`.
 
 Shaders dispatched via `synthesize_audio_shader` must expose the `AudioUniforms` binding contract described below.
 

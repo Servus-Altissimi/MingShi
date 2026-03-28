@@ -32,7 +32,7 @@ pub struct Instrument {
 impl Default for Instrument {
     fn default() -> Self {
         Instrument {
-            name: "Boomie".to_string(),
+            name: "MingShi".to_string(),
             source: InstrumentSource::Synthesized(WaveformType::Sine),
             attack: 0.01,
             decay: 0.1,

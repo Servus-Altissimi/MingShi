@@ -1,4 +1,4 @@
-// GPU-accelerated-synthesis for Boomie! This is a very very very niche feature, and mostly
+// GPU-accelerated-synthesis for MingShi! This is a very very very niche feature, and mostly
 // tailored towards UmbraFex (See README). Functionality is partially inspired on that of ShaderToy.
 // There aren't a lot of open-source examples to work with.
 // I also heavily utilized Sonnet 4.6, though I tried to keep it clean.
@@ -9,7 +9,7 @@
 //   - GpuNoteData      private per-note buffer uploaded to the GPU per track.
 //   - SynthUniforms    private uniforms for the synth shader.
 //
-// Shader loading keeps the Boomie spirit:
+// Shader loading keeps the MingShi spirit:
 //   - gpu.load_shader("synth", "shaders/synth.wgsl")
 //   - The engine looks up synth (or the built-in fallback) when synthesizing.
 //
@@ -77,7 +77,7 @@ struct SynthUniforms {
 
 
 // Name for the built-in synth shader is registered in the cache, can be shadowed with `load_shader(DEFAULT_SYNTH_SHADER_NAME, PATH)`.
-pub const DEFAULT_SYNTH_SHADER_NAME: &str = "__boomie_synth";
+pub const DEFAULT_SYNTH_SHADER_NAME: &str = "__mingshi_synth";
 
 fn build_default_synth_shader(used_waveforms: &[WaveformType]) -> String {
     let mut seen = std::collections::HashSet::new();
@@ -545,7 +545,7 @@ impl GpuSynthEngine {
     async fn compile_shader(&self, source: &str) -> Result<wgpu::ShaderModule, String> {
         let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
         let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("boomie_sh"),
+            label: Some("mingshi_sh"),
             source: wgpu::ShaderSource::Wgsl(Cow::Owned(source.to_string())),
         });
         let info = shader.get_compilation_info().await;
