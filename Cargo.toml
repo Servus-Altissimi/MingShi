@@ -33,8 +33,3 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 name = "mingshi"
 path = "src/lib.rs"
 
-[workspace]
-members = [
-    ".",
-    "examples/web_demo",
-]
