@@ -183,10 +183,8 @@ pub struct GpuSynthEngine {
 
 impl GpuSynthEngine {
     pub async fn new() -> Result<Self, SynthError> {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..Default::default()
-        });
+		let instance = wgpu::Instance::default();
+
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -542,21 +540,19 @@ impl GpuSynthEngine {
         self.readback_buffer(&staging_buf, out_bytes).await
     }
 
-    async fn compile_shader(&self, source: &str) -> Result<wgpu::ShaderModule, String> {
-        let scope = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("mingshi_sh"),
-            source: wgpu::ShaderSource::Wgsl(Cow::Owned(source.to_string())),
-        });
-        let info = shader.get_compilation_info().await;
-        let errs: Vec<String> = info.messages.iter()
-            .filter(|m| m.message_type == wgpu::CompilationMessageType::Error)
-            .map(|m| format!("line {}: {}", m.location.map_or(0, |l| l.line_number), m.message))
-            .collect();
-        let _ = scope.pop().await;
-        if !errs.is_empty() { return Err(errs.join("\n")); }
-        Ok(shader)
-    }
+	async fn compile_shader(&self, source: &str) -> Result<wgpu::ShaderModule, String> {
+    	let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        	label: Some("mingshi_sh"),
+        	source: wgpu::ShaderSource::Wgsl(Cow::Owned(source.to_string())),
+    	});
+    	let info = shader.get_compilation_info().await;
+    	let errs: Vec<String> = info.messages.iter()
+        	.filter(|m| m.message_type == wgpu::CompilationMessageType::Error)
+        	.map(|m| format!("line {}: {}", m.location.map_or(0, |l| l.line_number), m.message))
+        	.collect();
+    	if !errs.is_empty() { return Err(errs.join("\n")); }
+    	Ok(shader)
+	}
 
     fn make_bgl(&self, label: &str, entries: &[wgpu::BindGroupLayoutEntry]) -> wgpu::BindGroupLayout {
         self.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -574,7 +570,7 @@ impl GpuSynthEngine {
     ) -> wgpu::ComputePipeline {
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(label),
-            bind_group_layouts: &[bgl],
+            bind_group_layouts: &[Some(bgl)],
             immediate_size: 0,
         });
         self.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -587,20 +583,23 @@ impl GpuSynthEngine {
         })
     }
 
-    async fn readback_buffer(&self, staging: &wgpu::Buffer, size: u64) -> Result<Vec<f32>, String> {
+	async fn readback_buffer(&self, staging: &wgpu::Buffer, _size: u64) -> Result<Vec<f32>, String> {
         let (tx, mut rx) = mpsc::unbounded::<Result<(), wgpu::BufferAsyncError>>();
         staging.slice(..).map_async(wgpu::MapMode::Read, move |r| { let _ = tx.unbounded_send(r); });
-
+    
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.device.poll(wgpu::Maintain::Wait);
+            let _ = self.device.poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            });
             match rx.try_recv() {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => return Err(format!("Buffer map error: {e:?}")),
                 Err(_) => return Err("Buffer map callback not received after Wait poll".into()),
             }
         }
-
+    
         #[cfg(target_arch = "wasm32")]
         loop {
             match rx.try_recv() {
@@ -609,14 +608,14 @@ impl GpuSynthEngine {
                 Err(_) => gloo_timers::future::TimeoutFuture::new(1).await,
             }
         }
-
+    
         let view = staging.slice(..).get_mapped_range();
         let floats = bytemuck::cast_slice::<u8, f32>(&view).to_vec();
         drop(view);
         staging.unmap();
         Ok(floats)
     }
-
+    
     pub fn shader_cache_insert(&mut self, name: &str, src: String) {
         self.shader_cache.insert(name.to_string(), src);
     }

@@ -1,6 +1,6 @@
 [package]
 name = "mingshi"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Servus Altissimi"]
 description = "Real-time music synthesizer and composition engine with dynamic playback control, advanced audio effects, and optional GPU-accelerated synthesis via WGPU. Designed for on the fly compositing."
@@ -22,7 +22,7 @@ gpu = ["dep:wgpu", "dep:bytemuck", "dep:futures-channel"]
 cpal     = "0.16"
 fastrand = "2.3.0"
 hound    = "3.5.1"
-wgpu   	 = { version = "28", optional = true }
+wgpu   	 = { version = "29", optional = true }
 bytemuck = { version = "1",  features = ["derive"], optional = true }
 futures-channel = { version = "0.3", optional = true }
 
@@ -32,3 +32,9 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 [lib]
 name = "mingshi"
 path = "src/lib.rs"
+
+[workspace]
+members = [
+    ".",
+    "examples/web_demo",
+]
