@@ -97,7 +97,7 @@ impl SynthEngine {
                 mel_cache: HashMap::new(),
                 sample_cache: HashMap::new(),
                 stream_config: stream_config.clone(),
-                sample_rate: stream_config.sample_rate.0 as f32,
+                sample_rate: stream_config.sample_rate as f32,
                 playback_context: Arc::new(Mutex::new(None)),
                 stream: None,
             })
@@ -111,7 +111,7 @@ impl SynthEngine {
             sample_cache: HashMap::new(),
             stream_config: StreamConfig {
                 channels:    2,
-                sample_rate: cpal::SampleRate(sample_rate as u32),
+                sample_rate: sample_rate as u32,     
                 buffer_size: cpal::BufferSize::Default,
             },
             sample_rate,

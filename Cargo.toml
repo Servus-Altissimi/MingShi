@@ -19,7 +19,7 @@ default = []
 gpu = ["dep:wgpu", "dep:bytemuck", "dep:futures-channel"]
 
 [dependencies]
-cpal     = "0.16"
+cpal     = "0.17"
 fastrand = "2.3.0"
 hound    = "3.5.1"
 wgpu   	 = { version = "29", optional = true }
@@ -27,7 +27,7 @@ bytemuck = { version = "1",  features = ["derive"], optional = true }
 futures-channel = { version = "0.3", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-timers = { version = "0.4", features = ["futures"] }
 
 [lib]
 name = "mingshi"
