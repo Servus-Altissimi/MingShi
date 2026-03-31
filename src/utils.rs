@@ -1,40 +1,48 @@
 use crate::error::SynthError;
 
-// TODO: Use standard MIDI formula
+// Uses the standard MIDI formula: f = 440 × 2^((n − 69) / 12)
 
 pub fn parse_note(note_str: &str) -> Result<f32, SynthError> {
     let note_str = note_str.to_uppercase();
-    let mut freq = match note_str.chars().next() {
-        Some('C') => 16.35,
-        Some('D') => 18.35,
-        Some('E') => 20.60,
-        Some('F') => 21.83,
-        Some('G') => 24.50,
-        Some('A') => 27.50,
-        Some('B') => 30.87,
-        _ => return Err(SynthError::ParseError("Invalid note".to_string())),
+
+    let semitone: i32 = match note_str.chars().next() {
+        Some('C') =>  0,
+        Some('D') =>  2,
+        Some('E') =>  4,
+        Some('F') =>  5,
+        Some('G') =>  7,
+        Some('A') =>  9,
+        Some('B') => 11,
+        _ => return Err(SynthError::ParseError("Invalid note name".to_string())),
     };
 
-    let second_char = note_str.chars().nth(1);
-    let has_accidental = matches!(second_char, Some('#') | Some('S') | Some('B') | Some('F'));
-    
-    if has_accidental {
-        match second_char {
-            Some('#') | Some('S') => freq *= 1.059463,
-            Some('B') | Some('F') => freq *= 0.943874,
-            _ => {}
-        }
-    }
+    let second = note_str.chars().nth(1);
+    let has_accidental = matches!(second, Some('#') | Some('S') | Some('B') | Some('F'));
+
+    let semitone = match second {
+        Some('#') | Some('S') => semitone + 1,
+        Some('B') | Some('F') => semitone - 1,
+        _ => semitone,
+    };
 
     let octave_start = if has_accidental { 2 } else { 1 };
     let octave_str = note_str[octave_start..].trim();
+    let octave: i32 = if octave_str.is_empty() {
+        4 // default to octave 4
+    } else {
+        octave_str.parse::<i32>().map_err(|_| {
+            SynthError::ParseError(format!("Invalid octave: '{octave_str}'"))
+        })?
+    };
+  
+    let midi_note = (octave + 1) * 12 + semitone;
 
-    if !octave_str.is_empty() {
-        if let Ok(octave) = octave_str.parse::<i32>() {
-            freq *= 2.0_f32.powi(octave);
-        }
+    if !(0..=127).contains(&midi_note) {
+        return Err(SynthError::ParseError(format!(
+            "MIDI note {midi_note} out of range 0–127 (got {note_str})"
+        )));
     }
-
+ 
+    let freq = 440.0_f32 * 2.0_f32.powf((midi_note - 69) as f32 / 12.0);
     Ok(freq)
-
 }
