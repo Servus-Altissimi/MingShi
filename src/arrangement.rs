@@ -139,7 +139,7 @@ impl Arrangement {
                         }
                     }
                     
-                    if let Some(track) = mel_cache.get(mel_file) {
+					if let Some(track) = mel_cache.get(mel_file) {
                         let mut modified_track = track.clone();
                         
                         if overrides.tempo.is_some() {
@@ -150,8 +150,12 @@ impl Arrangement {
                             modified_track.tempo = master_tempo;
                         }
                         
-                        arrangement.tracks.push((modified_track, start_time, overrides));
-                        let end_time = start_time + track.length;
+                        arrangement.tracks.push((modified_track.clone(), start_time, overrides));
+
+                        // track.length is in beat units; convert to seconds so
+                        // total_length stays in the same unit as start_time.
+                        let beat_dur = 60.0 / modified_track.tempo;
+                        let end_time = start_time + modified_track.length * beat_dur;
                         if end_time > arrangement.total_length {
                             arrangement.total_length = end_time;
                         }
