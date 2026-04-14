@@ -15,6 +15,7 @@ pub mod track;
 pub mod arrangement;
 pub mod engine;
 pub mod utils;
+pub mod midi;
 
 #[cfg(feature = "gpu")]
 pub mod gpu_synth;
@@ -26,6 +27,7 @@ pub use effects::{EffectsChain, ReverbParams, DelayParams, DistortionParams, Fil
 pub use track::{MelodyTrack, LoopPoint};
 pub use arrangement::{Arrangement, TrackOverrides};
 pub use engine::{SynthEngine, PlaybackState, DynamicParameters};
+pub use midi::parse_midi_bytes;
 
 #[cfg(feature = "gpu")]
 pub use gpu_synth::{GpuSynthEngine, AudioUniforms};

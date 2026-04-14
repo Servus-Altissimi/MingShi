@@ -18,7 +18,7 @@ pub struct TrackOverrides {
 #[derive(Debug, Clone)]
 pub struct Arrangement {
     pub name: String,
-    pub tracks: Vec<(MelodyTrack, f32, TrackOverrides)>, // TrackOverrides
+    pub tracks: Vec<(MelodyTrack, f32, TrackOverrides)>, 
     pub total_length: f32,
     pub loop_point: Option<LoopPoint>,
     pub master_tempo: Option<f32>,
@@ -139,7 +139,7 @@ impl Arrangement {
                         }
                     }
                     
-					if let Some(track) = mel_cache.get(mel_file) {
+                    if let Some(track) = mel_cache.get(mel_file) {
                         let mut modified_track = track.clone();
                         
                         if overrides.tempo.is_some() {
@@ -165,7 +165,7 @@ impl Arrangement {
                 }
             }
         }
-        // Return error only if the arrangement has no valid tracks
+
         if arrangement.tracks.is_empty() {
             return Err(SynthError::InvalidInstrument(
                 "Arrangement has no valid tracks".to_string()

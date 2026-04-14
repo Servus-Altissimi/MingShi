@@ -623,7 +623,12 @@ impl GpuSynthEngine {
     pub fn get_sample_cache(&self) -> &HashMap<String, SampleData> {
         self.cpu.get_sample_cache()
     }
+
+    pub fn load_midi(&mut self, name_prefix: &str, path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        self.cpu.load_midi(name_prefix, path)
+    }
 }
+
 
 
 fn bgl_entry(binding: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayoutEntry {

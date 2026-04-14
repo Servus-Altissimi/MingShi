@@ -75,7 +75,7 @@ impl SynthEngine {
                 sample_cache: HashMap::new(),
                 stream_config: StreamConfig {
                     channels: 2,
-                    sample_rate: cpal::SampleRate(44100),
+                    sample_rate: 44100,
                     buffer_size: cpal::BufferSize::Default,
                 },
                 sample_rate: 44100.0,
@@ -406,14 +406,13 @@ impl SynthEngine {
         self.synthesize_arrangement_private(arrangement, &DynamicParameters::default())
     }
 
-    fn synthesize_arrangement_private(
+	fn synthesize_arrangement_private(
         &self,
         arrangement: &Arrangement,
         params: &DynamicParameters,
     ) -> Result<Vec<f32>, SynthError> {
         let total_samples = (arrangement.total_length * self.sample_rate) as usize;
         let mut buffer = vec![0.0f32; total_samples];
-        let chunk_size = 1024;
 
         for (track, start_time, overrides) in &arrangement.tracks {
             let enabled = params.track_enabled.get(&track.name).copied().unwrap_or(true);
@@ -430,23 +429,29 @@ impl SynthEngine {
             if let Some(f) = &overrides.filter      { t.instrument.effects.filter     = Some(f.clone()); }
             t.instrument.volume *= track_vol;
 
-            let track_total = (t.length * self.sample_rate) as usize;
-            let mut fx = if t.instrument.effects.has_any() { Some(EffectsProcessor::new(self.sample_rate)) } else { None };
+            // Actual duration in samples
+            let beat_dur    = 60.0 / t.tempo;
+            let track_secs  = t.length * beat_dur;
+            let track_total = (track_secs * self.sample_rate) as usize;
+            if track_total == 0 { continue; }
 
-            let mut offset = 0;
-            while offset < track_total {
-                let csz = chunk_size.min(track_total - offset);
-                let mut chunk = vec![0.0f32; csz];
-                self.synthesize_track_into(&mut chunk, &t, offset);
-                if let Some(fx) = &mut fx {
-                    for s in chunk.iter_mut() { *s = fx.process(*s, &t.instrument.effects); }
+            // Synthesize the full track into its own buffer in one pass.
+            let mut track_buf = vec![0.0f32; track_total];
+            self.synthesize_track_into(&mut track_buf, &t, 0);
+
+            // Then apply stateful effects in a single ordered pass
+            if t.instrument.effects.has_any() {
+                let mut fx = EffectsProcessor::new(self.sample_rate);
+                for s in track_buf.iter_mut() {
+                    *s = fx.process(*s, &t.instrument.effects);
                 }
-                for (i, &s) in chunk.iter().enumerate() {
-                    if let Some(dst) = buffer.get_mut(start_sample + offset + i) {
-                        *dst += s * params.master_volume;
-                    }
+            }
+
+            // To accumulate into the arrangement output buffer.
+            for (i, &s) in track_buf.iter().enumerate() {
+                if let Some(dst) = buffer.get_mut(start_sample + i) {
+                    *dst += s * params.master_volume;
                 }
-                offset += csz;
             }
         }
 
@@ -548,17 +553,64 @@ impl SynthEngine {
     }
 
     fn calculate_envelope_static(time: f32, duration: f32, instr: &Instrument) -> f32 {
-        let ae = instr.attack;
-        let de = ae + instr.decay;
-        let rs = duration - instr.release;
-        if time < ae {
-            time / ae
-        } else if time < de {
-            1.0 - (time - ae) / instr.decay * (1.0 - instr.sustain)
-        } else if time < rs {
-            instr.sustain
+        if time >= duration { return 0.0; }
+
+        let attack  = instr.attack.max(1e-6);
+        let decay   = instr.decay.max(1e-6);
+        let release = instr.release.max(1e-6);
+
+        // When a note is shorter than attack + release, proportionally scale both so they still fit.
+        let min_ar = attack + release;
+        let (eff_attack, eff_release) = if duration < min_ar {
+            let s = duration / min_ar;
+            (attack * s, release * s)
         } else {
-            instr.sustain * (1.0 - (time - rs) / instr.release)
+            (attack, release)
+        };
+
+        // rel_start is always >= 0 now because eff_release <= duration by construction.
+        let rel_start = duration - eff_release;
+
+        // Level at the moment release begins, may land mid-attack or mid-decay.
+        let level_at_rel = if rel_start < eff_attack {
+            rel_start / eff_attack
+        } else if rel_start < eff_attack + decay {
+            1.0 - ((rel_start - eff_attack) / decay) * (1.0 - instr.sustain)
+        } else {
+            instr.sustain
+        };
+
+        if time >= rel_start {
+            let t = (time - rel_start) / eff_release;
+            return level_at_rel * (1.0 - t).max(0.0);
+        }
+
+        if time < eff_attack {
+            time / eff_attack
+        } else if time < eff_attack + decay {
+            1.0 - ((time - eff_attack) / decay) * (1.0 - instr.sustain)
+        } else {
+            instr.sustain
         }
     }
+
+    pub fn load_midi(&mut self, name_prefix: &str, path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let data   = std::fs::read(path)?;
+        let tracks = crate::midi::parse_midi_bytes(&data)?;
+        let single = tracks.len() == 1;
+        let mut keys = Vec::with_capacity(tracks.len());
+
+        for track in tracks {
+            let key = if single {
+                name_prefix.to_string()
+            } else {
+                format!("{}_{}", name_prefix, track.name)
+            };
+            self.mel_cache.insert(key.clone(), track);
+            keys.push(key);
+        }
+
+        Ok(keys)
+    }
 }
+
