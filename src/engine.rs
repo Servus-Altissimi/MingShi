@@ -64,6 +64,25 @@ pub struct SynthEngine {
     stream: Option<Stream>,
 }
 
+// pan in [-1, 1]; returns (left_gain, right_gain)
+fn pan_gains(pan: f32) -> (f32, f32) {
+    let angle = (pan.clamp(-1.0, 1.0) + 1.0) * std::f32::consts::FRAC_PI_4;
+    (angle.cos(), angle.sin())
+}
+
+fn apply_swing(beat_pos: f32, swing: f32) -> f32 {
+    if swing == 0.0 { return beat_pos; }
+    let ratio = 0.5 + swing / 3.0;
+    let beat  = beat_pos.floor();
+    let frac  = beat_pos - beat;
+    let swung = if frac < 0.5 {
+        frac * ratio * 2.0
+    } else {
+        ratio + (frac - 0.5) * (1.0 - ratio) * 2.0
+    };
+    beat + swung
+}
+
 impl SynthEngine {
     pub fn new() -> Result<Self, SynthError> {
          
@@ -282,7 +301,7 @@ impl SynthEngine {
                         return;
                     }
                     for frame in data.chunks_mut(config.channels as usize) {
-                        let mut output = Self::synthesize_single_sample(
+                        let (mut l, mut r) = Self::synthesize_single_sample(
                             &context.arrangement,
                             context.current_sample,
                             sample_rate,
@@ -290,13 +309,14 @@ impl SynthEngine {
                         );
                         if let Some(ref mut cf) = context.crossfade_state {
                             let t = cf.progress / cf.duration_samples as f32;
-                            let tgt = Self::synthesize_single_sample(
+                            let (tl, tr) = Self::synthesize_single_sample(
                                 &cf.target_arrangement,
                                 context.current_sample,
                                 sample_rate,
                                 &context.dynamic_params,
                             );
-                            output = output * (1.0 - t) + tgt * t;
+                            l = l * (1.0 - t) + tl * t;
+                            r = r * (1.0 - t) + tr * t;
                             cf.progress += 1.0;
                             if cf.progress >= cf.duration_samples as f32 {
                                 context.arrangement = cf.target_arrangement.clone();
@@ -323,8 +343,13 @@ impl SynthEngine {
                         let mut fade = 1.0f32;
                         if let Some(fi) = context.arrangement.fade_in  { if cur_t < fi { fade *= cur_t / fi; } }
                         if let Some(fo) = context.arrangement.fade_out { let fs = tot - fo; if cur_t > fs { fade *= (tot - cur_t) / fo; } }
-                        let final_out = output * context.dynamic_params.master_volume * fade;
-                        for s in frame.iter_mut() { *s = final_out; }
+                        let scale = context.dynamic_params.master_volume * fade;
+                        if frame.len() >= 2 {
+                            frame[0] = l * scale;
+                            frame[1] = r * scale;
+                        } else {
+                            frame[0] = (l + r) * 0.5 * scale;
+                        }
                     }
                 } else {
                     for s in data.iter_mut() { *s = 0.0; }
@@ -339,29 +364,37 @@ impl SynthEngine {
         Ok(())
     }
 
+    // Swing and pan only gets applied here. 
     fn synthesize_single_sample(
         arrangement: &Arrangement,
         sample_idx: usize,
         sample_rate: f32,
         params: &DynamicParameters,
-    ) -> f32 {
-        let mut output = 0.0;
+    ) -> (f32, f32) {
+        let mut left  = 0.0f32;
+        let mut right = 0.0f32;
         let current_time = sample_idx as f32 / sample_rate;
+
         for (track, start_time, overrides) in &arrangement.tracks {
             let enabled = params.track_enabled.get(&track.name).copied().unwrap_or(true);
             if !enabled { continue; }
             let track_vol = params.track_volumes.get(&track.name).copied().unwrap_or(1.0);
             if current_time < *start_time { continue; }
             let track_time = current_time - start_time;
-            let mut cum = 0.0;
+            let track_pan  = overrides.pan.unwrap_or(track.instrument.pan);
+
             let beat_dur = 60.0 / track.tempo;
+            let mut beat_pos = 0.0f32; // Accumulate in beats for correct swing lookup
+
             for element in &track.sequence {
                 match element {
                     SequenceElement::Note(note) => {
-                        let nd = note.duration * beat_dur;
-                        let next = cum + nd;
-                        if track_time >= cum && track_time < next {
-                            let t = track_time - cum;
+                        let swung_start = apply_swing(beat_pos, track.swing) * beat_dur;
+                        let swung_end   = apply_swing(beat_pos + note.duration, track.swing) * beat_dur;
+
+                        if track_time >= swung_start && track_time < swung_end {
+                            let t  = track_time - swung_start;
+                            let nd = swung_end - swung_start;
                             let env = Self::calculate_envelope_static(t, nd, &track.instrument);
                             let mut pitch = note.pitch;
                             if let Some(st) = note.slide_to {
@@ -372,34 +405,43 @@ impl SynthEngine {
                                 InstrumentSource::Sample(sd)      => Self::interpolate_sample(sd, t, track.instrument.pitch * params.master_pitch),
                             };
                             let vol = track.instrument.volume * overrides.volume.unwrap_or(1.0) * track_vol;
-                            output += sample * env * note.velocity * vol;
+                            let contrib = sample * env * note.velocity * vol;
+                            let pan = note.pan.unwrap_or(track_pan);
+                            let (lg, rg) = pan_gains(pan);
+                            left  += contrib * lg;
+                            right += contrib * rg;
                             break;
                         }
-                        cum = next;
+                        beat_pos += note.duration;
                     }
                     SequenceElement::Chord(chord) => {
-                        let cd = chord.duration * beat_dur;
-                        let next = cum + cd;
-                        if track_time >= cum && track_time < next {
-                            let t = track_time - cum;
+                        let swung_start = apply_swing(beat_pos, track.swing) * beat_dur;
+                        let swung_end   = apply_swing(beat_pos + chord.duration, track.swing) * beat_dur;
+
+                        if track_time >= swung_start && track_time < swung_end {
+                            let t  = track_time - swung_start;
+                            let cd = swung_end - swung_start;
                             let env = Self::calculate_envelope_static(t, cd, &track.instrument);
+                            let (lg, rg) = pan_gains(track_pan);
                             for pitch in &chord.pitches {
                                 let sample = match &track.instrument.source {
                                     InstrumentSource::Synthesized(wf) => wf.generate_sample((track_time * pitch * params.master_pitch) % 1.0),
                                     InstrumentSource::Sample(sd)      => Self::interpolate_sample(sd, t, track.instrument.pitch * params.master_pitch),
                                 };
                                 let vol = track.instrument.volume * overrides.volume.unwrap_or(1.0) * track_vol;
-                                output += sample * env * chord.velocity * vol / chord.pitches.len() as f32;
+                                let contrib = sample * env * chord.velocity * vol / chord.pitches.len() as f32;
+                                left  += contrib * lg;
+                                right += contrib * rg;
                             }
                             break;
                         }
-                        cum = next;
+                        beat_pos += chord.duration;
                     }
-                    SequenceElement::Rest(d) => { cum += d * beat_dur; }
+                    SequenceElement::Rest(d) => { beat_pos += d; }
                 }
             }
         }
-        output
+        (left, right)
     }
 
     pub fn synthesize_arrangement(&self, arrangement: &Arrangement) -> Result<Vec<f32>, SynthError> {
@@ -470,67 +512,82 @@ impl SynthEngine {
         Ok(buffer)
     }
  
+    // Pan is not applied here, the offline path is mono; live path will handle pan in synthesize_single_sample.
     pub(crate) fn synthesize_track_into(&self, buffer: &mut [f32], track: &MelodyTrack, start_sample: usize) {
-        let mut cur = 0usize;
+        let sr       = self.sample_rate;
         let beat_dur = 60.0 / track.tempo;
+        let mut beat_pos = 0.0f32;
+
         for element in &track.sequence {
             match element {
                 SequenceElement::Note(note) => {
-                    let nd = note.duration * beat_dur;
+                    let swung_start_s = apply_swing(beat_pos, track.swing) * beat_dur;
+                    let swung_end_s   = apply_swing(beat_pos + note.duration, track.swing) * beat_dur;
+                    let note_dur      = swung_end_s - swung_start_s;
+                    let note_off      = (swung_start_s * sr) as usize;
+                    let ns            = (note_dur * sr) as usize;
+
                     match &track.instrument.source {
                         InstrumentSource::Synthesized(_) => {
-                            let ns = (nd * self.sample_rate) as usize;
                             let mut phase = 0.0f32;
                             for i in 0..ns {
-                                let idx = start_sample + cur + i;
+                                let idx = start_sample + note_off + i;
                                 if idx >= buffer.len() { break; }
-                                let t = i as f32 / self.sample_rate;
-                                let env = self.calculate_envelope(t, nd, &track.instrument);
+                                let t = i as f32 / sr;
+                                let env = self.calculate_envelope(t, note_dur, &track.instrument);
                                 let mut pitch = note.pitch;
-                                if let Some(st) = note.slide_to { pitch = note.pitch * (1.0 - t / nd) + st * (t / nd); }
+                                if let Some(st) = note.slide_to {
+                                    pitch = note.pitch * (1.0 - t / note_dur) + st * (t / note_dur);
+                                }
                                 if let InstrumentSource::Synthesized(wf) = &track.instrument.source {
                                     buffer[idx] += wf.generate_sample(phase) * env * note.velocity * track.instrument.volume;
-                                    phase += pitch / self.sample_rate;
+                                    phase += pitch / sr;
                                     if phase >= 1.0 { phase -= 1.0; }
                                 }
                             }
-                            cur += ns;
                         }
+
                         InstrumentSource::Sample(sd) => {
-                            let pr  = track.instrument.pitch;
+                            let pr   = track.instrument.pitch;
                             let olen = (sd.samples.len() as f32 / pr) as usize;
-                            let adur = olen as f32 / self.sample_rate;
+                            let adur = olen as f32 / sr;
                             for i in 0..olen {
-                                let idx = start_sample + cur + i;
+                                let idx = start_sample + note_off + i;
                                 if idx >= buffer.len() { break; }
-                                let t = i as f32 / self.sample_rate;
+                                let t = i as f32 / sr;
                                 let env = self.calculate_envelope(t, adur, &track.instrument);
                                 buffer[idx] += Self::interpolate_sample(sd, t, pr) * env * note.velocity * track.instrument.volume;
                             }
-                            cur += olen;
                         }
                     }
+                    beat_pos += note.duration;
                 }
+
                 SequenceElement::Chord(chord) => {
-                    let cd = chord.duration * beat_dur;
-                    let cs = (cd * self.sample_rate) as usize;
+                    let swung_start_s = apply_swing(beat_pos, track.swing) * beat_dur;
+                    let swung_end_s   = apply_swing(beat_pos + chord.duration, track.swing) * beat_dur;
+                    let chord_dur     = swung_end_s - swung_start_s;
+                    let chord_off     = (swung_start_s * sr) as usize;
+                    let cs            = (chord_dur * sr) as usize;
+
                     for pitch in &chord.pitches {
                         let mut phase = 0.0f32;
                         for i in 0..cs {
-                            let idx = start_sample + cur + i;
+                            let idx = start_sample + chord_off + i;
                             if idx >= buffer.len() { break; }
-                            let t = i as f32 / self.sample_rate;
-                            let env = self.calculate_envelope(t, cd, &track.instrument);
+                            let t = i as f32 / sr;
+                            let env = self.calculate_envelope(t, chord_dur, &track.instrument);
                             if let InstrumentSource::Synthesized(wf) = &track.instrument.source {
                                 buffer[idx] += wf.generate_sample(phase) * env * chord.velocity * track.instrument.volume / chord.pitches.len() as f32;
-                                phase += pitch / self.sample_rate;
+                                phase += pitch / sr;
                                 if phase >= 1.0 { phase -= 1.0; }
                             }
                         }
                     }
-                    cur += cs;
+                    beat_pos += chord.duration;
                 }
-                SequenceElement::Rest(d) => { cur += (d * beat_dur * self.sample_rate) as usize; }
+
+                SequenceElement::Rest(d) => { beat_pos += d; }
             }
         }
     }
@@ -613,4 +670,3 @@ impl SynthEngine {
         Ok(keys)
     }
 }
-
