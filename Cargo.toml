@@ -1,6 +1,6 @@
 [package]
 name = "mingshi"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["Servus Altissimi"]
 description = "Real-time music synthesizer and composition engine with dynamic playback control, advanced audio effects, and optional GPU-accelerated synthesis via WGPU. Designed for on the fly compositing."
